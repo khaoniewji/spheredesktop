@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/main.qml</file>
+        <file>qml/taskbar/TaskbarMain.qml</file>
+        <file>qml/components/Dock.qml</file>
+    </qresource>
+</RCC>
