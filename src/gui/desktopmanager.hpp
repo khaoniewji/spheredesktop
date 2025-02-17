@@ -7,6 +7,9 @@
 #include <QFileSystemWatcher>
 #include <QTimer>
 #include <QPointF>
+#include <QHash>
+#include <QDateTime>
+#include <QSize>
 
 class DesktopManager : public QObject {
     Q_OBJECT
@@ -33,7 +36,7 @@ public slots:
     void setWallpaper(const QString &path);
     void saveIconPosition(int index, qreal x, qreal y);
     void resetIconPositions();
-    Q_INVOKABLE QPointF getDefaultPosition(int index) const;  // Add Q_INVOKABLE
+    Q_INVOKABLE QPointF getDefaultPosition(int index) const;
 
 signals:
     void wallpaperChanged();
@@ -42,11 +45,20 @@ signals:
     void recentWallpapersChanged();
 
 private:
+    struct WallpaperCache {
+        QString path;
+        QDateTime lastModified;
+        QSize resolution;
+        bool isValid;
+    };
+
     void loadWallpaperFromRegistry();
     void loadDesktopItems();
     void setupWallpaperWatcher();
     void updateRecentWallpapers(const QString &path);
-
+    void initializeCache();
+    void updateWallpaperCache(const QString& path);
+    void cleanupCache();
 
     static const QString WALLPAPER_REG_KEY;
     static const QString WALLPAPER_REG_VALUE;
@@ -63,4 +75,8 @@ private:
     QStringList m_recentWallpapers;
     QFileSystemWatcher* m_watcher;
     QTimer* m_registryTimer;
+
+    WallpaperCache m_wallpaperCache;
+    QHash<QString, QPointF> m_iconPositionCache;
+    bool m_isInitialized;
 };

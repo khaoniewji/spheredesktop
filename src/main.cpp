@@ -7,55 +7,50 @@
 #include <QDebug>
 #include "gui/mainscreen.hpp"
 #include "gui/desktopmanager.hpp"
+
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <GL/gl.h>
 #endif
 
 void setupHighDPI() {
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-    QGuiApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 }
 
 void setupGraphics() {
     QSurfaceFormat format;
-
-    // Basic 2D optimized settings
     format.setRenderableType(QSurfaceFormat::OpenGL);
-    format.setSamples(0);  // Disable MSAA for better performance
-    format.setSwapInterval(0);  // Disable VSync for unlimited FPS
-    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setVersion(4, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setSwapInterval(0);  // Disable VSync
+    format.setSwapBehavior(QSurfaceFormat::TripleBuffer);
 
-#ifdef QT_DEBUG
-    format.setOption(QSurfaceFormat::DebugContext);
-#endif
+    // Optimize buffer configuration
+    format.setSamples(0);
+    format.setDepthBufferSize(0);
+    format.setStencilBufferSize(0);
+    format.setAlphaBufferSize(8);
 
     QSurfaceFormat::setDefaultFormat(format);
 }
 
 void setupRenderingBackend() {
-    // Enable basic rendering
-    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
-
-// High performance render loop
-#if defined(Q_OS_WIN)
-    qputenv("QSG_RENDER_LOOP", "windows");
-#else
     qputenv("QSG_RENDER_LOOP", "threaded");
-#endif
-
-    // Performance optimizations
     qputenv("QSG_RENDERER", "threaded");
     qputenv("QT_QUICK_BACKEND", "desktop");
+    qputenv("QSG_RHI_BACKEND", "opengl");
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+    qputenv("QSG_NO_VSYNC", "1");
+    qputenv("QSG_RENDERER_TIMING", "1");
     qputenv("QT_QUICK_DIRTY_REGIONS", "1");
-    qputenv("QML_DISABLE_ANIMATIONS", "0");
-    qputenv("QT_QUICK_NORMAL_RENDERING", "1");
 }
 
 void setupDebugOptions() {
 #ifdef QT_DEBUG
     qputenv("QSG_RENDERER_DEBUG", "1");
     qputenv("QT_LOGGING_RULES", "qt.quick.dirty=true");
+    qputenv("QSG_INFO", "1");
 #endif
 }
 
@@ -64,16 +59,33 @@ void setupQmlEngine(QQmlApplicationEngine& engine) {
     qmlRegisterType<DesktopManager>("Sphere.Desktop", 1, 0, "DesktopManager");
 }
 
+void setupSystemOptimizations() {
+#ifdef Q_OS_WIN
+    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+
+    DWORD_PTR processAffinityMask = 0;
+    DWORD_PTR systemAffinityMask = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &processAffinityMask, &systemAffinityMask)) {
+        SetProcessAffinityMask(GetCurrentProcess(), processAffinityMask);
+    }
+
+    SetProcessWorkingSetSize(GetCurrentProcess(), -1, -1);
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     // Optimize application startup
     qputenv("QT_ENABLE_GLYPH_CACHE_WORKAROUND", "1");
     qputenv("QT_QPA_DISABLE_MODERN_PROCESS", "1");
+    qputenv("QT_ENABLE_SHADER_DISK_CACHE", "1");
+    qputenv("QML_DISK_CACHE_ONLY", "1");
 
-    // Set application attributes
-    QGuiApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+    // High performance attributes
+    QGuiApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
     QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QGuiApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents);
+    QGuiApplication::setAttribute(Qt::AA_DontCheckOpenGLContextThreadAffinity);
 
     // Setup high DPI support
     setupHighDPI();
@@ -83,6 +95,9 @@ int main(int argc, char *argv[])
 
     // Create application instance
     QGuiApplication app(argc, argv);
+
+    // Setup system optimizations
+    setupSystemOptimizations();
 
     // Set application metadata
     app.setApplicationName("Sphere Desktop");
@@ -108,12 +123,21 @@ int main(int argc, char *argv[])
             return -1;
         }
 
-// Enable high performance power profile on Windows
 #ifdef Q_OS_WIN
-        SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED);
+        SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        timeBeginPeriod(1);
 #endif
 
-        return app.exec();
+        // Run the application
+        int result = app.exec();
+
+#ifdef Q_OS_WIN
+        timeEndPeriod(1);
+        SetThreadExecutionState(ES_CONTINUOUS);
+#endif
+
+        return result;
 
     } catch (const std::exception& e) {
         qCritical() << "Fatal error:" << e.what();

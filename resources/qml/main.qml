@@ -3,7 +3,10 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
 import Sphere.Desktop 1.0
+import QtQuick.Effects
 import "./taskbar" as Taskbar
+import "./components" as Components
+
 
 Window {
     id: root
@@ -12,67 +15,128 @@ Window {
     visible: true
     title: "Sphere Desktop"
     flags: Qt.Window | Qt.FramelessWindowHint
+    color: "transparent"
 
-    // Property for performance monitoring
-    property bool debugMode: false
+    // Properties
+    property bool debugMode: true
+    property int windowBorderRadius: 8
+    property color windowBorderColor: "#1A1A1A"
+
+    // Performance properties
+    property bool fastRendering: true
+
+    Component.onCompleted: {
+        if (fastRendering) {
+            QQuickWindow.sceneGraphBackend = "threaded"
+            QQuickWindow.graphicsApi = "opengl"
+        }
+    }
 
     DesktopManager {
         id: desktopManager
+    }
+
+    Components.DesktopMenuStyle {
+        id: menuStyle
+    }
+
+    // Window background
+    Rectangle {
+        id: windowFrame
+        anchors.fill: parent
+        color: "#2E2E2E"
+        radius: windowBorderRadius
+        border {
+            width: 1
+            color: windowBorderColor
+        }
     }
 
     // Desktop background with optimizations
     Rectangle {
         id: backgroundRect
         anchors.fill: parent
+        anchors.margins: 1
         color: "#000000"
 
-        Image {
-            id: wallpaper
+        ShaderEffectSource {
+            id: wallpaperSource
             anchors.fill: parent
-            source: desktopManager.wallpaperPath ? "file:///" + desktopManager.wallpaperPath : ""
-            fillMode: {
-                switch(desktopManager.wallpaperStyle) {
-                    case "0": return Image.PreserveAspectFit;
-                    case "2": return Image.PreserveAspectCrop;
-                    case "6": return Image.PreserveAspectCrop;
-                    case "10": return Image.PreserveAspectCrop;
-                    case "22": return Image.Tile;
-                    default: return Image.PreserveAspectCrop;
+            sourceItem: Image {
+                id: wallpaperImage
+                width: wallpaperSource.width
+                height: wallpaperSource.height
+                source: desktopManager.wallpaperPath ? "file:///" + desktopManager.wallpaperPath : ""
+                fillMode: {
+                    switch(desktopManager.wallpaperStyle) {
+                        case "0": return Image.PreserveAspectFit;
+                        case "2": return Image.PreserveAspectCrop;
+                        case "6": return Image.PreserveAspectCrop;
+                        case "10": return Image.PreserveAspectCrop;
+                        case "22": return Image.Tile;
+                        default: return Image.PreserveAspectCrop;
+                    }
+                }
+                asynchronous: true
+                cache: true
+                smooth: false
+                mipmap: true
+
+                sourceSize {
+                    width: Screen.width
+                    height: Screen.height
                 }
             }
-            cache: true
-            asynchronous: true
-            sourceSize.width: width
-            sourceSize.height: height
+            live: false
+            hideSource: true
             smooth: false
-            mipmap: true
+            // textureProvider: true
+            recursive: false
+        }
 
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: 300
-                    easing.type: Easing.OutCubic
-                }
-            }
-
-            onStatusChanged: {
-                if (status === Image.Error) {
-                    console.error("Failed to load wallpaper:", source)
-                }
-            }
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+            opacity: 0.02
         }
     }
 
-    // Desktop icons area
-    Item {
-        id: desktopIconsArea
+    // Window drag area
+    MouseArea {
+        id: windowDragArea
         anchors {
             top: parent.top
             left: parent.left
             right: parent.right
-            bottom: taskbar.top
+        }
+        height: 24
+        property point clickPos: "1,1"
+
+        onPressed: (mouse) => {
+            clickPos = Qt.point(mouse.x, mouse.y)
         }
 
-        // Selection rectangle
+        onPositionChanged: (mouse) => {
+            if (pressed) {
+                let delta = Qt.point(mouse.x - clickPos.x, mouse.y - clickPos.y)
+                root.x += delta.x
+                root.y += delta.y
+            }
+        }
+    }
+
+    // Desktop icons area with optimization
+    Item {
+        id: desktopIconsArea
+        anchors {
+            top: taskbar.bottom
+            left: parent.left
+            right: parent.right
+            bottom: dock.top
+            margins: 1
+        }
+
+        // Selection rectangle with hardware acceleration
         Rectangle {
             id: selectionRect
             visible: false
@@ -81,12 +145,12 @@ Window {
             border.width: 1
             z: 1000
             antialiasing: true
+            layer.enabled: root.useHardwareAcceleration
         }
 
-        // Optimized repeater for desktop icons
+        // Optimized desktop icons
         Repeater {
             model: desktopManager.desktopItems
-
             delegate: Item {
                 id: iconDelegate
                 width: 100
@@ -96,12 +160,20 @@ Window {
 
                 property bool isSelected: false
 
+                // Optimize rendering by disabling when not visible
+                visible: {
+                    let itemRect = Qt.rect(x, y, width, height)
+                    let viewRect = Qt.rect(0, 0, desktopIconsArea.width, desktopIconsArea.height)
+                    return root.intersectRect(itemRect, viewRect)
+                }
+
                 Rectangle {
                     anchors.fill: parent
                     color: iconDelegate.isSelected ? "#3373737F" : "transparent"
                     radius: 5
                     visible: iconDelegate.isSelected || dragArea.drag.active
                     antialiasing: true
+                    layer.enabled: visible && root.useHardwareAcceleration
                 }
 
                 Column {
@@ -118,6 +190,7 @@ Window {
                         }
                         color: "white"
                         renderType: Text.NativeRendering
+                        layer.enabled: root.useHardwareAcceleration
                     }
 
                     Text {
@@ -133,10 +206,10 @@ Window {
                         maximumLineCount: 2
                         elide: Text.ElideRight
                         renderType: Text.NativeRendering
+                        layer.enabled: root.useHardwareAcceleration
                     }
                 }
 
-                // Optimized MouseArea with timer for drag detection
                 MouseArea {
                     id: dragArea
                     anchors.fill: parent
@@ -155,11 +228,11 @@ Window {
                     property point startPos
                     property bool isDragging: false
 
-                    onPressed: {
+                    onPressed: (mouse) => {
                         if (mouse.button === Qt.LeftButton) {
                             startPos = Qt.point(mouse.x, mouse.y)
                             if (!(mouse.modifiers & Qt.ControlModifier)) {
-                                Qt.callLater(function() {
+                                Qt.callLater(() => {
                                     for (let i = 0; i < desktopIconsArea.children.length; i++) {
                                         let item = desktopIconsArea.children[i]
                                         if (item.isSelected !== undefined) {
@@ -173,10 +246,10 @@ Window {
                         }
                     }
 
-                    onReleased: {
+                    onReleased: (mouse) => {
                         dragTimer.stop()
                         if (isDragging) {
-                            Qt.callLater(function() {
+                            Qt.callLater(() => {
                                 desktopManager.saveIconPosition(index, parent.x, parent.y)
                             })
                             isDragging = false
@@ -185,14 +258,13 @@ Window {
                         }
                     }
 
-                    onDoubleClicked: {
+                    onDoubleClicked: (mouse) => {
                         if (mouse.button === Qt.LeftButton) {
                             desktopManager.openItem(modelData.path)
                         }
                     }
                 }
 
-                // Smooth animations
                 Behavior on x {
                     enabled: !dragArea.drag.active
                     SmoothedAnimation {
@@ -211,7 +283,7 @@ Window {
             }
         }
 
-        // Optimized selection area
+        // Selection area with optimization
         MouseArea {
             id: selectionArea
             anchors.fill: parent
@@ -223,13 +295,13 @@ Window {
 
             Timer {
                 id: selectionUpdateTimer
-                interval: 16 // ~60 FPS
+                interval: 16
                 repeat: true
                 running: selectionArea.pressed
-                onTriggered: updateSelection()
+                onTriggered: parent.updateSelection()
             }
 
-            onPressed: {
+            onPressed: (mouse) => {
                 if (mouse.button === Qt.LeftButton) {
                     selectionStart = Qt.point(mouse.x, mouse.y)
                     selectionRect.x = selectionStart.x
@@ -264,102 +336,134 @@ Window {
             }
 
             function updateSelection() {
-                Qt.callLater(function() {
+                Qt.callLater(() => {
                     let selRect = Qt.rect(selectionRect.x, selectionRect.y,
                                         selectionRect.width, selectionRect.height)
                     for (let i = 0; i < desktopIconsArea.children.length; i++) {
                         let item = desktopIconsArea.children[i]
                         if (item.isSelected !== undefined) {
                             let itemRect = Qt.rect(item.x, item.y, item.width, item.height)
-                            item.isSelected = intersectRect(itemRect, selRect)
+                            item.isSelected = root.intersectRect(itemRect, selRect)
                         }
                     }
                 })
             }
         }
-
-        function intersectRect(r1, r2) {
-            return !(r2.x > r1.x + r1.width ||
-                    r2.x + r2.width < r1.x ||
-                    r2.y > r1.y + r1.height ||
-                    r2.y + r2.height < r1.y)
-        }
     }
 
-    // Taskbar
+    // Helper function for intersection testing
+    function intersectRect(r1, r2) {
+        return !(r2.x > r1.x + r1.width ||
+                r2.x + r2.width < r1.x ||
+                r2.y > r1.y + r1.height ||
+                r2.y + r2.height < r1.y)
+    }
+
+    // Performance optimized components
     Taskbar.TaskbarMain {
         id: taskbar
         anchors {
+            top: parent.top
             left: parent.left
             right: parent.right
-            bottom: parent.bottom
+            margins: 1
         }
-        height: 48
+        height: 24
+        layer.enabled: root.useHardwareAcceleration
     }
-    // Desktop context menu
+
+    Components.Dock {
+        id: dock
+        anchors {
+            bottom: parent.bottom
+            bottomMargin: 12
+            horizontalCenter: parent.horizontalCenter
+        }
+        height: 64
+        layer.enabled: root.useHardwareAcceleration
+    }
+
+    // Optimized context menu
     Menu {
         id: contextMenu
+        width: menuStyle.menuWidth
 
-        Menu {
-            title: "View"
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 100 }
+        }
 
-            MenuItem {
-                text: "Large icons"
-                onTriggered: desktopManager.setIconSize("large")
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 100 }
+        }
+
+        background: Rectangle {
+            implicitWidth: menuStyle.menuWidth
+            color: menuStyle.backgroundColor
+            opacity: 0.98
+            radius: menuStyle.radius
+            border.width: 1
+            border.color: menuStyle.borderColor
+            layer.enabled: root.useHardwareAcceleration
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#1A1A1A"
+                radius: menuStyle.radius
+                opacity: 0.3
             }
+        }
+    }
 
-            MenuItem {
-                text: "Medium icons"
-                onTriggered: desktopManager.setIconSize("medium")
-            }
+    // Performance monitor (visible when debugMode is true)
+    Column {
+        visible: debugMode
+        z: 1000
+        anchors {
+            right: parent.right
+            top: parent.top
+            margins: 10
+        }
 
-            MenuItem {
-                text: "Small icons"
-                onTriggered: desktopManager.setIconSize("small")
+        Text {
+            color: "white"
+            font.pixelSize: 12
+            text: "FPS: " + fpsCounter.fps.toFixed(1)
+        }
+
+        Text {
+            color: "white"
+            font.pixelSize: 12
+            text: "Frame Time: " + fpsCounter.frameTime.toFixed(1) + "ms"
+        }
+    }
+
+    // FPS Counter
+    Item {
+        id: fpsCounter
+        property real fps: 0
+        property real frameTime: 0
+        property int frameCount: 0
+        property real lastTime: Date.now()
+
+        Timer {
+            interval: 1000
+            repeat: true
+            running: root.debugMode
+            onTriggered: {
+                var current = Date.now()
+                var delta = (current - parent.lastTime) / 1000
+                parent.fps = parent.frameCount / delta
+                parent.frameTime = delta * 1000 / parent.frameCount
+                parent.frameCount = 0
+                parent.lastTime = current
             }
         }
 
-        Menu {
-            title: "Sort by"
-
-            MenuItem {
-                text: "Name"
-                onTriggered: desktopManager.sortBy("name")
+        Connections {
+            target: root
+            function onAfterRendering() {
+                fpsCounter.frameCount++
             }
-
-            MenuItem {
-                text: "Size"
-                onTriggered: desktopManager.sortBy("size")
-            }
-
-            MenuItem {
-                text: "Type"
-                onTriggered: desktopManager.sortBy("type")
-            }
-
-            MenuItem {
-                text: "Date modified"
-                onTriggered: desktopManager.sortBy("date")
-            }
-        }
-
-        MenuSeparator { }
-
-        MenuItem {
-            text: "Refresh"
-            onTriggered: desktopManager.refresh()
-        }
-
-        MenuSeparator { }
-
-        MenuItem {
-            text: "Personalize"
-            onTriggered: desktopManager.openPersonalization()
-        }
-
-        MenuItem {
-            text: "Reset icon positions"
-            onTriggered: desktopManager.resetIconPositions()
         }
     }
 }

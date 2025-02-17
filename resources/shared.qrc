@@ -3,5 +3,12 @@
         <file>qml/main.qml</file>
         <file>qml/taskbar/TaskbarMain.qml</file>
         <file>qml/components/Dock.qml</file>
+        <file>qml/components/CustomMenu.qml</file>
+        <file>qml/components/CustomMenuItem.qml</file>
+        <file>qml/components/CustomMenuSeparator.qml</file>
+        <file>qml/components/ContextMenu.qml</file>
+        <file>qml/components/ContextMenuItem.qml</file>
+        <file>qml/components/ContextMenuSeparator.qml</file>
+        <file>qml/components/DesktopMenuStyle.qml</file>
     </qresource>
 </RCC>
